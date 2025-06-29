@@ -94,6 +94,14 @@ const GameRoom: React.FC = () => {
     }
   };
 
+  const copyRoomLink = () => {
+    if (currentRoom) {
+      const roomLink = `${window.location.origin}${window.location.pathname}?room=${currentRoom.id}`;
+      navigator.clipboard.writeText(roomLink);
+      toast.success('Room link copied to clipboard!');
+    }
+  };
+
   if (!currentRoom) {
     return null;
   }
@@ -140,6 +148,15 @@ const GameRoom: React.FC = () => {
         </div>
         
         <div className="flex items-center space-x-3">
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={copyRoomLink}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold"
+          >
+            Copy Link
+          </motion.button>
+          
           <motion.button
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}

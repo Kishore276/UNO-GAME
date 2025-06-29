@@ -19,7 +19,8 @@ const GameLobby: React.FC = () => {
     setShowRules,
     setShowDemo,
     joinRoom,
-    createRoom
+    createRoom,
+    findRoom
   } = useGameStore();
 
   const [showCreateRoom, setShowCreateRoom] = useState(false);
@@ -27,6 +28,36 @@ const GameLobby: React.FC = () => {
   const [maxPlayers, setMaxPlayers] = useState(10);
   const [isPrivate, setIsPrivate] = useState(false);
   const [password, setPassword] = useState('');
+
+  // Check for room ID in URL and auto-join
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const roomId = urlParams.get('room');
+    
+    if (roomId && currentUser) {
+      const existingRoom = findRoom(roomId);
+      if (existingRoom) {
+        // Auto-join the room
+        handleAutoJoinRoom(roomId);
+      } else {
+        // Show join modal for the room ID
+        setShowJoinRoomModal(true);
+      }
+    }
+  }, [currentUser, findRoom, setShowJoinRoomModal]);
+
+  const handleAutoJoinRoom = async (roomId: string) => {
+    try {
+      await joinRoom(roomId);
+      toast.success(`Joined room ${roomId}!`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to join room');
+      // Remove room ID from URL if join fails
+      const url = new URL(window.location.href);
+      url.searchParams.delete('room');
+      window.history.replaceState({}, '', url.toString());
+    }
+  };
 
   useEffect(() => {
     // Generate mock rooms with room IDs
@@ -188,6 +219,12 @@ const GameLobby: React.FC = () => {
     toast.success('Room ID copied to clipboard!');
   };
 
+  const copyRoomLink = (roomId: string) => {
+    const roomLink = `${window.location.origin}${window.location.pathname}?room=${roomId}`;
+    navigator.clipboard.writeText(roomLink);
+    toast.success('Room link copied to clipboard!');
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900">
       {/* Header */}
@@ -309,6 +346,13 @@ const GameLobby: React.FC = () => {
                       title="Click to copy room ID"
                     >
                       ID: {room.id}
+                    </button>
+                    <button
+                      onClick={() => copyRoomLink(room.id)}
+                      className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded"
+                      title="Click to copy room link"
+                    >
+                      Copy Link
                     </button>
                   </div>
                 </div>

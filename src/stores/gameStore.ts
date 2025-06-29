@@ -2,6 +2,32 @@ import { create } from 'zustand';
 import { Player, GameRoom, GameState, ChatMessage, Tournament, Club, Achievement } from '../types/game';
 import { generateRoomId, canJoinRoom, addPlayerToRoom, removePlayerFromRoom } from '../utils/gameLogic';
 
+// Room persistence utilities
+const ROOM_STORAGE_KEY = 'uno-arena-rooms';
+
+const saveRoomsToStorage = (rooms: GameRoom[]) => {
+  try {
+    localStorage.setItem(ROOM_STORAGE_KEY, JSON.stringify(rooms));
+  } catch (error) {
+    console.warn('Failed to save rooms to localStorage:', error);
+  }
+};
+
+const loadRoomsFromStorage = (): GameRoom[] => {
+  try {
+    const stored = localStorage.getItem(ROOM_STORAGE_KEY);
+    return stored ? JSON.parse(stored) : [];
+  } catch (error) {
+    console.warn('Failed to load rooms from localStorage:', error);
+    return [];
+  }
+};
+
+const getRoomIdFromUrl = (): string | null => {
+  const urlParams = new URLSearchParams(window.location.search);
+  return urlParams.get('room');
+};
+
 interface GameStore {
   // User state
   currentUser: Player | null;
@@ -25,6 +51,7 @@ interface GameStore {
   createRoom: (roomData: Partial<GameRoom>) => GameRoom;
   updateRoom: (roomId: string, updates: Partial<GameRoom>) => void;
   findRoom: (roomId: string) => GameRoom | undefined;
+  initializeRooms: () => void;
   
   // Game state
   gameState: GameState | null;
@@ -87,11 +114,57 @@ export const useGameStore = create<GameStore>((set, get) => ({
   showJoinRoomModal: false,
   showChat: true,
   setCurrentRoom: (room) => set({ currentRoom: room }),
-  setAvailableRooms: (rooms) => set({ availableRooms: rooms }),
+  setAvailableRooms: (rooms) => {
+    set({ availableRooms: rooms });
+    saveRoomsToStorage(rooms);
+  },
   setShowJoinRoomModal: (show) => set({ showJoinRoomModal: show }),
   setShowChat: (show) => set({ showChat: show }),
   
   // Room management functions
+  initializeRooms: () => {
+    const { setAvailableRooms } = get();
+    
+    // Load rooms from localStorage
+    const storedRooms = loadRoomsFromStorage();
+    
+    // Check for room ID in URL
+    const urlRoomId = getRoomIdFromUrl();
+    
+    if (urlRoomId && !storedRooms.find(room => room.id === urlRoomId)) {
+      // If room ID is in URL but not in stored rooms, create a placeholder room
+      const placeholderRoom: GameRoom = {
+        id: urlRoomId,
+        name: `Room ${urlRoomId}`,
+        isPrivate: false,
+        maxPlayers: 10,
+        currentPlayers: 0,
+        players: [],
+        gameInProgress: false,
+        host: '',
+        gameMode: {
+          name: 'Classic',
+          description: 'Standard UNO rules',
+          rules: ['Standard UNO rules apply'],
+          isTeamMode: false,
+          maxPlayers: 10
+        },
+        houseRules: {
+          stackDrawCards: true,
+          jumpIn: false,
+          sevenSwap: false,
+          zeroRotate: false,
+          noBluffing: false,
+          challengeWild4: true
+        }
+      };
+      
+      setAvailableRooms([...storedRooms, placeholderRoom]);
+    } else {
+      setAvailableRooms(storedRooms);
+    }
+  },
+  
   joinRoom: async (roomId: string, password?: string) => {
     const { currentUser, availableRooms, setCurrentRoom, setAvailableRooms } = get();
     
@@ -151,6 +224,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
     }
     
     setCurrentRoom(targetRoom);
+    
+    // Update URL to include room ID
+    const url = new URL(window.location.href);
+    url.searchParams.set('room', roomId);
+    window.history.replaceState({}, '', url.toString());
+    
     return true;
   },
   
@@ -175,6 +254,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
     }
     
     setCurrentRoom(null);
+    
+    // Remove room ID from URL
+    const url = new URL(window.location.href);
+    url.searchParams.delete('room');
+    window.history.replaceState({}, '', url.toString());
   },
   
   createRoom: (roomData) => {

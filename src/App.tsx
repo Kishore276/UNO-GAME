@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Toaster } from 'react-hot-toast';
 import { useGameStore } from './stores/gameStore';
 import GameLobby from './components/GameLobby';
@@ -17,8 +17,14 @@ function App() {
     showJoinRoomModal,
     showRules,
     showDemo,
-    currentUser
+    currentUser,
+    initializeRooms
   } = useGameStore();
+
+  // Initialize rooms when app starts
+  useEffect(() => {
+    initializeRooms();
+  }, [initializeRooms]);
 
   return (
     <div className="min-h-screen">
