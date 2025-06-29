@@ -23,7 +23,15 @@ function App() {
 
   // Initialize rooms when app starts
   useEffect(() => {
-    initializeRooms();
+    const initApp = async () => {
+      try {
+        await initializeRooms();
+      } catch (error) {
+        console.error('Failed to initialize rooms:', error);
+      }
+    };
+    
+    initApp();
   }, [initializeRooms]);
 
   return (

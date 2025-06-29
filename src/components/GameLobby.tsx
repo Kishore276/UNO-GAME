@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Plus, Lock, Users, Play, Settings, Trophy, Star, Crown, Hash, LogIn, BookOpen, Video } from 'lucide-react';
+import { Plus, Lock, Users, Play, Settings, Trophy, Star, Crown, Hash, LogIn, BookOpen, Video, RefreshCw } from 'lucide-react';
 import { useGameStore } from '../stores/gameStore';
 import { GameRoom, Player } from '../types/game';
 import { generateMockPlayers } from '../utils/gameLogic';
@@ -20,7 +20,8 @@ const GameLobby: React.FC = () => {
     setShowDemo,
     joinRoom,
     createRoom,
-    findRoom
+    findRoom,
+    refreshRooms
   } = useGameStore();
 
   const [showCreateRoom, setShowCreateRoom] = useState(false);
@@ -28,6 +29,7 @@ const GameLobby: React.FC = () => {
   const [maxPlayers, setMaxPlayers] = useState(10);
   const [isPrivate, setIsPrivate] = useState(false);
   const [password, setPassword] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
   // Check for room ID in URL and auto-join
   useEffect(() => {
@@ -48,6 +50,7 @@ const GameLobby: React.FC = () => {
 
   const handleAutoJoinRoom = async (roomId: string) => {
     try {
+      setIsLoading(true);
       await joinRoom(roomId);
       toast.success(`Joined room ${roomId}!`);
     } catch (error) {
@@ -56,126 +59,32 @@ const GameLobby: React.FC = () => {
       const url = new URL(window.location.href);
       url.searchParams.delete('room');
       window.history.replaceState({}, '', url.toString());
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  useEffect(() => {
-    // Generate mock rooms with room IDs
-    const mockRooms: GameRoom[] = [
-      {
-        id: 'QUICK01',
-        name: 'Quick Match',
-        isPrivate: false,
-        maxPlayers: 8,
-        currentPlayers: 5,
-        players: generateMockPlayers(5),
-        gameInProgress: false,
-        host: 'player-0',
-        gameMode: {
-          name: 'Classic',
-          description: 'Standard UNO rules',
-          rules: ['Standard UNO rules apply'],
-          isTeamMode: false,
-          maxPlayers: 8
-        },
-        houseRules: {
-          stackDrawCards: true,
-          jumpIn: false,
-          sevenSwap: false,
-          zeroRotate: false,
-          noBluffing: false,
-          challengeWild4: true
-        }
-      },
-      {
-        id: 'TOURN2',
-        name: 'Tournament Practice',
-        isPrivate: false,
-        maxPlayers: 12,
-        currentPlayers: 8,
-        players: generateMockPlayers(8),
-        gameInProgress: true,
-        host: 'player-0',
-        gameMode: {
-          name: 'Tournament',
-          description: 'Competitive rules with no house rules',
-          rules: ['No house rules', 'Strict timing', 'Challenge system enabled'],
-          isTeamMode: false,
-          maxPlayers: 12
-        },
-        houseRules: {
-          stackDrawCards: false,
-          jumpIn: false,
-          sevenSwap: false,
-          zeroRotate: false,
-          noBluffing: true,
-          challengeWild4: true
-        }
-      },
-      {
-        id: 'TEAM99',
-        name: 'Team Chaos',
-        isPrivate: false,
-        maxPlayers: 16,
-        currentPlayers: 12,
-        players: generateMockPlayers(12),
-        gameInProgress: false,
-        host: 'player-0',
-        gameMode: {
-          name: 'Team Play',
-          description: '2v2v2v2 team battles',
-          rules: ['Team coordination allowed', 'All house rules enabled'],
-          isTeamMode: true,
-          maxPlayers: 16
-        },
-        houseRules: {
-          stackDrawCards: true,
-          jumpIn: true,
-          sevenSwap: true,
-          zeroRotate: true,
-          noBluffing: false,
-          challengeWild4: true
-        }
-      },
-      {
-        id: 'VIP777',
-        name: 'VIP Lounge',
-        isPrivate: true,
-        password: 'premium',
-        maxPlayers: 6,
-        currentPlayers: 3,
-        players: generateMockPlayers(3),
-        gameInProgress: false,
-        host: 'player-0',
-        gameMode: {
-          name: 'Premium',
-          description: 'Exclusive game mode for premium players',
-          rules: ['Premium players only', 'Special rewards'],
-          isTeamMode: false,
-          maxPlayers: 6
-        },
-        houseRules: {
-          stackDrawCards: true,
-          jumpIn: true,
-          sevenSwap: false,
-          zeroRotate: false,
-          noBluffing: false,
-          challengeWild4: true
-        }
-      }
-    ];
+  const handleRefreshRooms = async () => {
+    try {
+      setIsLoading(true);
+      await refreshRooms();
+      toast.success('Rooms refreshed!');
+    } catch (error) {
+      toast.error('Failed to refresh rooms');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-    setAvailableRooms(mockRooms);
-  }, [setAvailableRooms]);
-
-  const handleCreateRoom = () => {
+  const handleCreateRoom = async () => {
     if (!roomName.trim()) {
       toast.error('Please enter a room name');
       return;
     }
 
     try {
-      const newRoom = createRoom({
+      setIsLoading(true);
+      const newRoom = await createRoom({
         name: roomName,
         isPrivate,
         password: isPrivate ? password : undefined,
@@ -192,6 +101,8 @@ const GameLobby: React.FC = () => {
       });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to create room');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -207,10 +118,13 @@ const GameLobby: React.FC = () => {
     }
     
     try {
+      setIsLoading(true);
       await joinRoom(room.id);
       toast.success(`Joined ${room.name}!`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to join room');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -303,6 +217,17 @@ const GameLobby: React.FC = () => {
             <motion.button
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
+              onClick={handleRefreshRooms}
+              disabled={isLoading}
+              className="flex items-center space-x-2 bg-gray-600 hover:bg-gray-700 text-white px-4 py-3 rounded-lg font-semibold disabled:opacity-50"
+            >
+              <RefreshCw className={`w-5 h-5 ${isLoading ? 'animate-spin' : ''}`} />
+              <span>Refresh</span>
+            </motion.button>
+            
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
               onClick={() => setShowJoinRoomModal(true)}
               className="flex items-center space-x-2 bg-gradient-to-r from-blue-500 to-cyan-500 text-white px-6 py-3 rounded-lg font-semibold"
             >
@@ -322,90 +247,115 @@ const GameLobby: React.FC = () => {
           </div>
         </div>
 
+        {/* Loading State */}
+        {isLoading && (
+          <div className="flex justify-center items-center py-8">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
+            <span className="ml-3 text-white">Loading rooms...</span>
+          </div>
+        )}
+
         {/* Rooms Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {availableRooms.map((room) => (
-            <motion.div
-              key={room.id}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              whileHover={{ scale: 1.02 }}
-              className="bg-white/10 backdrop-blur-sm rounded-xl p-6 border border-white/20"
-            >
-              <div className="flex justify-between items-start mb-4">
-                <div>
-                  <h3 className="text-xl font-bold text-white flex items-center space-x-2">
-                    <span>{room.name}</span>
-                    {room.isPrivate && <Lock className="w-4 h-4 text-yellow-400" />}
-                  </h3>
-                  <p className="text-gray-300 text-sm">{room.gameMode.name}</p>
-                  <div className="flex items-center space-x-2 mt-1">
-                    <button
-                      onClick={() => copyRoomId(room.id)}
-                      className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1 rounded font-mono"
-                      title="Click to copy room ID"
-                    >
-                      ID: {room.id}
-                    </button>
-                    <button
-                      onClick={() => copyRoomLink(room.id)}
-                      className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded"
-                      title="Click to copy room link"
-                    >
-                      Copy Link
-                    </button>
-                  </div>
-                </div>
-                <div className="flex items-center space-x-1 text-sm">
-                  <Users className="w-4 h-4 text-blue-400" />
-                  <span className="text-white">{room.currentPlayers}/{room.maxPlayers}</span>
-                </div>
-              </div>
-
-              <div className="space-y-3 mb-4">
-                <div className="flex flex-wrap gap-2">
-                  {Object.entries(room.houseRules).filter(([_, enabled]) => enabled).map(([rule]) => (
-                    <span key={rule} className="text-xs bg-blue-500/20 text-blue-300 px-2 py-1 rounded-full">
-                      {rule.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}
-                    </span>
-                  ))}
-                </div>
-                
-                {room.gameInProgress && (
-                  <div className="flex items-center space-x-2 text-green-400">
-                    <Play className="w-4 h-4" />
-                    <span className="text-sm">Game in Progress</span>
-                  </div>
-                )}
-              </div>
-
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={() => handleJoinRoom(room)}
-                disabled={room.currentPlayers >= room.maxPlayers || room.isPrivate}
-                className={`w-full py-2 px-4 rounded-lg font-semibold ${
-                  room.currentPlayers >= room.maxPlayers
-                    ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
-                    : room.isPrivate
-                    ? 'bg-yellow-600 hover:bg-yellow-700 text-white'
-                    : room.gameInProgress
-                    ? 'bg-orange-600 hover:bg-orange-700 text-white'
-                    : 'bg-blue-600 hover:bg-blue-700 text-white'
-                }`}
+        {!isLoading && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {availableRooms.map((room) => (
+              <motion.div
+                key={room.id}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                whileHover={{ scale: 1.02 }}
+                className="bg-white/10 backdrop-blur-sm rounded-xl p-6 border border-white/20"
               >
-                {room.currentPlayers >= room.maxPlayers 
-                  ? 'Room Full' 
-                  : room.isPrivate
-                  ? 'Private Room'
-                  : room.gameInProgress 
-                  ? 'Spectate' 
-                  : 'Join Game'
-                }
-              </motion.button>
-            </motion.div>
-          ))}
-        </div>
+                <div className="flex justify-between items-start mb-4">
+                  <div>
+                    <h3 className="text-xl font-bold text-white flex items-center space-x-2">
+                      <span>{room.name}</span>
+                      {room.isPrivate && <Lock className="w-4 h-4 text-yellow-400" />}
+                    </h3>
+                    <p className="text-gray-300 text-sm">{room.gameMode.name}</p>
+                    <div className="flex items-center space-x-2 mt-1">
+                      <button
+                        onClick={() => copyRoomId(room.id)}
+                        className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1 rounded font-mono"
+                        title="Click to copy room ID"
+                      >
+                        ID: {room.id}
+                      </button>
+                      <button
+                        onClick={() => copyRoomLink(room.id)}
+                        className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded"
+                        title="Click to copy room link"
+                      >
+                        Copy Link
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex items-center space-x-1 text-sm">
+                    <Users className="w-4 h-4 text-blue-400" />
+                    <span className="text-white">{room.currentPlayers}/{room.maxPlayers}</span>
+                  </div>
+                </div>
+
+                <div className="space-y-3 mb-4">
+                  <div className="flex flex-wrap gap-2">
+                    {Object.entries(room.houseRules).filter(([_, enabled]) => enabled).map(([rule]) => (
+                      <span key={rule} className="text-xs bg-blue-500/20 text-blue-300 px-2 py-1 rounded-full">
+                        {rule.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}
+                      </span>
+                    ))}
+                  </div>
+                  
+                  {room.gameInProgress && (
+                    <div className="flex items-center space-x-2 text-green-400">
+                      <Play className="w-4 h-4" />
+                      <span className="text-sm">Game in Progress</span>
+                    </div>
+                  )}
+                </div>
+
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => handleJoinRoom(room)}
+                  disabled={room.currentPlayers >= room.maxPlayers || room.isPrivate || isLoading}
+                  className={`w-full py-2 px-4 rounded-lg font-semibold ${
+                    room.currentPlayers >= room.maxPlayers
+                      ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
+                      : room.isPrivate
+                      ? 'bg-yellow-600 hover:bg-yellow-700 text-white'
+                      : room.gameInProgress
+                      ? 'bg-orange-600 hover:bg-orange-700 text-white'
+                      : 'bg-blue-600 hover:bg-blue-700 text-white'
+                  } ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  {room.currentPlayers >= room.maxPlayers 
+                    ? 'Room Full' 
+                    : room.isPrivate
+                    ? 'Private Room'
+                    : room.gameInProgress 
+                    ? 'Spectate' 
+                    : 'Join Game'
+                  }
+                </motion.button>
+              </motion.div>
+            ))}
+          </div>
+        )}
+
+        {/* Empty State */}
+        {!isLoading && availableRooms.length === 0 && (
+          <div className="text-center py-12">
+            <div className="text-gray-400 text-lg mb-4">No rooms available</div>
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setShowCreateRoom(true)}
+              className="bg-gradient-to-r from-green-500 to-emerald-500 text-white px-6 py-3 rounded-lg font-semibold"
+            >
+              Create First Room
+            </motion.button>
+          </div>
+        )}
 
         {/* Create Room Modal */}
         {showCreateRoom && (
@@ -474,7 +424,8 @@ const GameLobby: React.FC = () => {
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
                   onClick={() => setShowCreateRoom(false)}
-                  className="flex-1 py-3 bg-gray-600 hover:bg-gray-700 text-white rounded-lg font-semibold"
+                  disabled={isLoading}
+                  className="flex-1 py-3 bg-gray-600 hover:bg-gray-700 text-white rounded-lg font-semibold disabled:opacity-50"
                 >
                   Cancel
                 </motion.button>
@@ -482,14 +433,14 @@ const GameLobby: React.FC = () => {
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
                   onClick={handleCreateRoom}
-                  disabled={!roomName.trim()}
+                  disabled={!roomName.trim() || isLoading}
                   className={`flex-1 py-3 rounded-lg font-semibold text-white ${
-                    roomName.trim()
+                    roomName.trim() && !isLoading
                       ? 'bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600'
                       : 'bg-gray-600 cursor-not-allowed opacity-50'
                   }`}
                 >
-                  Create Room
+                  {isLoading ? 'Creating...' : 'Create Room'}
                 </motion.button>
               </div>
             </motion.div>
