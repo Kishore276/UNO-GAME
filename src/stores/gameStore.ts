@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { Player, GameRoom, GameState, ChatMessage, Tournament, Club, Achievement } from '../types/game';
-import { generateRoomId, canJoinRoom, addPlayerToRoom, removePlayerFromRoom } from '../utils/gameLogic';
+import { generateRoomId, canJoinRoom } from '../utils/gameLogic';
 import { roomServerAPI } from '../utils/roomServer';
 
 // Room persistence utilities (keep for fallback)
@@ -48,7 +48,7 @@ interface GameStore {
   
   // Room management functions
   joinRoom: (roomId: string, password?: string) => Promise<boolean>;
-  leaveRoom: () => void;
+  leaveRoom: () => Promise<void>;
   createRoom: (roomData: Partial<GameRoom>) => Promise<GameRoom>;
   updateRoom: (roomId: string, updates: Partial<GameRoom>) => Promise<void>;
   findRoom: (roomId: string) => GameRoom | undefined;
@@ -123,164 +123,47 @@ export const useGameStore = create<GameStore>((set, get) => ({
   // Room management functions
   initializeRooms: async () => {
     const { setAvailableRooms } = get();
-    
-    try {
-      // Load rooms from server
-      const serverRooms = await roomServerAPI.getAllRooms();
-      setAvailableRooms(serverRooms);
-      
-      // Check for room ID in URL
-      const urlRoomId = getRoomIdFromUrl();
-      if (urlRoomId) {
-        // Try to get the specific room from server
-        const targetRoom = await roomServerAPI.getRoom(urlRoomId);
-        if (targetRoom && !serverRooms.find(room => room.id === urlRoomId)) {
-          setAvailableRooms([...serverRooms, targetRoom]);
-        }
-      }
-    } catch (error) {
-      console.warn('Failed to load rooms from server, using localStorage fallback:', error);
-      // Fallback to localStorage
-      const storedRooms = loadRoomsFromStorage();
-      setAvailableRooms(storedRooms);
+    // Subscribe to all rooms for real-time updates
+    roomServerAPI.subscribeToAllRooms((rooms) => {
+      setAvailableRooms(rooms);
+    });
+    // Optionally, join room from URL if present
+    const urlRoomId = getRoomIdFromUrl();
+    if (urlRoomId) {
+      await get().joinRoom(urlRoomId);
     }
   },
   
   refreshRooms: async () => {
     const { setAvailableRooms } = get();
-    try {
-      const serverRooms = await roomServerAPI.getAllRooms();
-      setAvailableRooms(serverRooms);
-    } catch (error) {
-      console.warn('Failed to refresh rooms:', error);
-    }
+    const rooms = await roomServerAPI.getAllRooms();
+    setAvailableRooms(rooms);
   },
   
   joinRoom: async (roomId: string, password?: string) => {
     const { currentUser, setCurrentRoom } = get();
-    
-    if (!currentUser) {
-      throw new Error('Please create a username first');
-    }
-
-    try {
-      // Try to get room from server first
-      let targetRoom = await roomServerAPI.getRoom(roomId);
-      
-      if (!targetRoom) {
-        // Room doesn't exist on server, create it
-        targetRoom = {
-          id: roomId,
-          name: `Room ${roomId}`,
-          isPrivate: password ? true : false,
-          password: password || undefined,
-          maxPlayers: 10,
-          currentPlayers: 1,
-          players: [currentUser],
-          gameInProgress: false,
-          host: currentUser.id,
-          gameMode: {
-            name: 'Classic',
-            description: 'Standard UNO rules',
-            rules: ['Standard UNO rules apply'],
-            isTeamMode: false,
-            maxPlayers: 10
-          },
-          houseRules: {
-            stackDrawCards: true,
-            jumpIn: false,
-            sevenSwap: false,
-            zeroRotate: false,
-            noBluffing: false,
-            challengeWild4: true
-          }
-        };
-        
-        targetRoom = await roomServerAPI.createRoom(targetRoom);
-      } else {
-        // Room exists, validate if we can join
-        const validation = canJoinRoom(targetRoom, currentUser, password);
-        if (!validation.canJoin) {
-          throw new Error(validation.error || 'Cannot join room');
-        }
-        
-        // Add user to room on server
-        targetRoom = await roomServerAPI.addPlayerToRoom(roomId, currentUser);
-      }
-      
-      setCurrentRoom(targetRoom);
-      
-      // Update URL to include room ID
-      const url = new URL(window.location.href);
-      url.searchParams.set('room', roomId);
-      window.history.replaceState({}, '', url.toString());
-      
-      // Subscribe to room updates
-      const unsubscribe = roomServerAPI.subscribeToRoom(roomId, (updatedRoom) => {
-        set({ currentRoom: updatedRoom });
-      });
-      
-      // Store unsubscribe function for cleanup
-      set({ currentRoom: { ...targetRoom, _unsubscribe: unsubscribe } });
-      
-      return true;
-    } catch (error) {
-      console.error('Failed to join room:', error);
-      throw error;
-    }
-  },
-  
-  leaveRoom: async () => {
-    const { currentRoom, currentUser, setCurrentRoom } = get();
-    
-    if (!currentRoom || !currentUser) return;
-    
-    try {
-      // Remove user from room on server
-      await roomServerAPI.removePlayerFromRoom(currentRoom.id, currentUser.id);
-      
-      // Unsubscribe from room updates
-      if (currentRoom._unsubscribe) {
-        currentRoom._unsubscribe();
-      }
-      
-      setCurrentRoom(null);
-      
-      // Remove room ID from URL
-      const url = new URL(window.location.href);
-      url.searchParams.delete('room');
-      window.history.replaceState({}, '', url.toString());
-    } catch (error) {
-      console.error('Failed to leave room:', error);
-    }
-  },
-  
-  createRoom: async (roomData) => {
-    const { currentUser, setAvailableRooms, availableRooms } = get();
-    
-    if (!currentUser) {
-      throw new Error('Please create a username first');
-    }
-    
-    try {
-      const newRoom: GameRoom = {
-        id: roomData.id || generateRoomId(),
-        name: roomData.name || 'New Room',
-        isPrivate: roomData.isPrivate || false,
-        password: roomData.password,
-        maxPlayers: roomData.maxPlayers || 10,
+    if (!currentUser) throw new Error('Please create a username first');
+    let targetRoom = await roomServerAPI.getRoom(roomId);
+    if (!targetRoom) {
+      // Create new room if not exists
+      targetRoom = {
+        id: roomId,
+        name: `Room ${roomId}`,
+        isPrivate: password ? true : false,
+        password: password || undefined,
+        maxPlayers: 10,
         currentPlayers: 1,
         players: [currentUser],
         gameInProgress: false,
         host: currentUser.id,
-        gameMode: roomData.gameMode || {
+        gameMode: {
           name: 'Classic',
           description: 'Standard UNO rules',
           rules: ['Standard UNO rules apply'],
           isTeamMode: false,
-          maxPlayers: roomData.maxPlayers || 10
+          maxPlayers: 10
         },
-        houseRules: roomData.houseRules || {
+        houseRules: {
           stackDrawCards: true,
           jumpIn: false,
           sevenSwap: false,
@@ -289,41 +172,75 @@ export const useGameStore = create<GameStore>((set, get) => ({
           challengeWild4: true
         }
       };
-      
-      // Create room on server
-      const createdRoom = await roomServerAPI.createRoom(newRoom);
-      
-      // Update local state
-      setAvailableRooms([...availableRooms, createdRoom]);
-      
-      return createdRoom;
-    } catch (error) {
-      console.error('Failed to create room:', error);
-      throw error;
+      await roomServerAPI.createRoom(targetRoom);
+    } else {
+      // Validate join
+      const validation = canJoinRoom(targetRoom, currentUser, password);
+      if (!validation.canJoin) throw new Error(validation.error || 'Cannot join room');
+      // Add player to room
+      await roomServerAPI.addPlayerToRoom(roomId, currentUser);
     }
+    // Subscribe to room updates
+    if (get().currentRoom?._unsubscribe) get().currentRoom._unsubscribe();
+    const unsubscribe = roomServerAPI.subscribeToRoom(roomId, (updatedRoom) => {
+      set({ currentRoom: { ...updatedRoom, _unsubscribe: unsubscribe } });
+    });
+    // Set current room
+    setCurrentRoom({ ...(await roomServerAPI.getRoom(roomId)), _unsubscribe: unsubscribe });
+    // Update URL
+    const url = new URL(window.location.href);
+    url.searchParams.set('room', roomId);
+    window.history.replaceState({}, '', url.toString());
+    return true;
+  },
+  
+  leaveRoom: async () => {
+    const { currentRoom, currentUser, setCurrentRoom } = get();
+    if (!currentRoom || !currentUser) return;
+    await roomServerAPI.removePlayerFromRoom(currentRoom.id, currentUser.id);
+    if (currentRoom._unsubscribe) currentRoom._unsubscribe();
+    setCurrentRoom(null);
+    // Remove room ID from URL
+    const url = new URL(window.location.href);
+    url.searchParams.delete('room');
+    window.history.replaceState({}, '', url.toString());
+  },
+  
+  createRoom: async (roomData) => {
+    const { currentUser } = get();
+    if (!currentUser) throw new Error('Please create a username first');
+    const newRoom: GameRoom = {
+      id: roomData.id || generateRoomId(),
+      name: roomData.name || 'New Room',
+      isPrivate: roomData.isPrivate || false,
+      password: roomData.password,
+      maxPlayers: roomData.maxPlayers || 10,
+      currentPlayers: 1,
+      players: [currentUser],
+      gameInProgress: false,
+      host: currentUser.id,
+      gameMode: roomData.gameMode || {
+        name: 'Classic',
+        description: 'Standard UNO rules',
+        rules: ['Standard UNO rules apply'],
+        isTeamMode: false,
+        maxPlayers: roomData.maxPlayers || 10
+      },
+      houseRules: roomData.houseRules || {
+        stackDrawCards: true,
+        jumpIn: false,
+        sevenSwap: false,
+        zeroRotate: false,
+        noBluffing: false,
+        challengeWild4: true
+      }
+    };
+    await roomServerAPI.createRoom(newRoom);
+    return newRoom;
   },
   
   updateRoom: async (roomId: string, updates: Partial<GameRoom>) => {
-    const { availableRooms, setAvailableRooms, currentRoom, setCurrentRoom } = get();
-    
-    try {
-      // Update room on server
-      const updatedRoom = await roomServerAPI.updateRoom(roomId, updates);
-      
-      // Update local state
-      const updatedRooms = availableRooms.map(room => 
-        room.id === roomId ? updatedRoom : room
-      );
-      setAvailableRooms(updatedRooms);
-      
-      // Update current room if it's the one being updated
-      if (currentRoom?.id === roomId) {
-        setCurrentRoom(updatedRoom);
-      }
-    } catch (error) {
-      console.error('Failed to update room:', error);
-      throw error;
-    }
+    await roomServerAPI.updateRoom(roomId, updates);
   },
   
   findRoom: (roomId: string) => {
