@@ -1,6 +1,23 @@
 // Simple mock room server for demo purposes
 // In a real app, this would be a proper backend server
 
+import { db } from './firebase';
+import {
+  collection,
+  doc,
+  setDoc,
+  getDoc,
+  getDocs,
+  updateDoc,
+  onSnapshot,
+  addDoc,
+  deleteDoc,
+  query,
+  where,
+  runTransaction,
+  Unsubscribe
+} from 'firebase/firestore';
+
 interface RoomServer {
   rooms: Map<string, any>;
   subscribers: Map<string, Set<(room: any) => void>>;
@@ -15,111 +32,105 @@ const roomServer: RoomServer = {
 // Simulate network delay
 const simulateNetworkDelay = () => new Promise(resolve => setTimeout(resolve, 100 + Math.random() * 200));
 
+const ROOMS_COLLECTION = 'rooms';
+
 export const roomServerAPI = {
-  // Create or get room
-  async getRoom(roomId: string): Promise<any | null> {
-    await simulateNetworkDelay();
-    return roomServer.rooms.get(roomId) || null;
+  // Create a new room (only if it doesn't exist)
+  async createRoom(roomData: any) {
+    const roomRef = doc(db, ROOMS_COLLECTION, roomData.id);
+    await setDoc(roomRef, roomData, { merge: false });
+    return { ...roomData };
   },
 
-  // Create room
-  async createRoom(roomData: any): Promise<any> {
-    await simulateNetworkDelay();
-    const room = { ...roomData, id: roomData.id, createdAt: Date.now() };
-    roomServer.rooms.set(room.id, room);
-    
-    // Notify subscribers
-    const subscribers = roomServer.subscribers.get(room.id);
-    if (subscribers) {
-      subscribers.forEach(callback => callback(room));
-    }
-    
-    return room;
+  // Get a room by ID
+  async getRoom(roomId: string) {
+    const roomRef = doc(db, ROOMS_COLLECTION, roomId);
+    const snap = await getDoc(roomRef);
+    return snap.exists() ? snap.data() : null;
   },
 
-  // Update room
-  async updateRoom(roomId: string, updates: any): Promise<any> {
-    await simulateNetworkDelay();
-    const existingRoom = roomServer.rooms.get(roomId);
-    if (!existingRoom) {
-      throw new Error('Room not found');
-    }
-    
-    const updatedRoom = { ...existingRoom, ...updates };
-    roomServer.rooms.set(roomId, updatedRoom);
-    
-    // Notify subscribers
-    const subscribers = roomServer.subscribers.get(roomId);
-    if (subscribers) {
-      subscribers.forEach(callback => callback(updatedRoom));
-    }
-    
-    return updatedRoom;
+  // Get all rooms
+  async getAllRooms() {
+    const roomsCol = collection(db, ROOMS_COLLECTION);
+    const snap = await getDocs(roomsCol);
+    return snap.docs.map(doc => doc.data());
   },
 
-  // Delete room
-  async deleteRoom(roomId: string): Promise<void> {
-    await simulateNetworkDelay();
-    roomServer.rooms.delete(roomId);
-    roomServer.subscribers.delete(roomId);
+  // Update a room
+  async updateRoom(roomId: string, updates: any) {
+    const roomRef = doc(db, ROOMS_COLLECTION, roomId);
+    await updateDoc(roomRef, updates);
+    const snap = await getDoc(roomRef);
+    return snap.data();
   },
 
-  // Subscribe to room updates
-  subscribeToRoom(roomId: string, callback: (room: any) => void): () => void {
-    if (!roomServer.subscribers.has(roomId)) {
-      roomServer.subscribers.set(roomId, new Set());
-    }
-    
-    const subscribers = roomServer.subscribers.get(roomId)!;
-    subscribers.add(callback);
-    
-    // Return unsubscribe function
-    return () => {
-      subscribers.delete(callback);
-      if (subscribers.size === 0) {
-        roomServer.subscribers.delete(roomId);
+  // Delete a room
+  async deleteRoom(roomId: string) {
+    const roomRef = doc(db, ROOMS_COLLECTION, roomId);
+    await deleteDoc(roomRef);
+  },
+
+  // ATOMIC: Add player to room or create room if not exists
+  async joinOrCreateRoom(roomId: string, player: any, roomDataIfCreate: any) {
+    const roomRef = doc(db, ROOMS_COLLECTION, roomId);
+    return await runTransaction(db, async (transaction) => {
+      const roomSnap = await transaction.get(roomRef);
+      if (!roomSnap.exists()) {
+        // Create the room with this player as the first player
+        transaction.set(roomRef, {
+          ...roomDataIfCreate,
+          id: roomId,
+          players: [player],
+          currentPlayers: 1
+        });
+        return { ...roomDataIfCreate, id: roomId, players: [player], currentPlayers: 1 };
+      } else {
+        // Room exists, add player if not already present
+        const room = roomSnap.data();
+        const players = room.players || [];
+        const alreadyInRoom = players.some((p: any) => p.id === player.id);
+        if (!alreadyInRoom) {
+          players.push(player);
+        }
+        transaction.update(roomRef, {
+          players,
+          currentPlayers: players.length
+        });
+        return { ...room, players, currentPlayers: players.length };
       }
-    };
-  },
-
-  // Get all rooms (for lobby)
-  async getAllRooms(): Promise<any[]> {
-    await simulateNetworkDelay();
-    return Array.from(roomServer.rooms.values());
-  },
-
-  // Add player to room
-  async addPlayerToRoom(roomId: string, player: any): Promise<any> {
-    const room = await this.getRoom(roomId);
-    if (!room) {
-      throw new Error('Room not found');
-    }
-    
-    // Check if player already exists
-    const existingPlayerIndex = room.players.findIndex((p: any) => p.id === player.id);
-    if (existingPlayerIndex >= 0) {
-      // Update existing player
-      room.players[existingPlayerIndex] = player;
-    } else {
-      // Add new player
-      room.players.push(player);
-      room.currentPlayers = room.players.length;
-    }
-    
-    return this.updateRoom(roomId, room);
+    });
   },
 
   // Remove player from room
-  async removePlayerFromRoom(roomId: string, playerId: string): Promise<any> {
-    const room = await this.getRoom(roomId);
-    if (!room) {
-      throw new Error('Room not found');
-    }
-    
-    room.players = room.players.filter((p: any) => p.id !== playerId);
-    room.currentPlayers = room.players.length;
-    
-    return this.updateRoom(roomId, room);
+  async removePlayerFromRoom(roomId: string, playerId: string) {
+    const roomRef = doc(db, ROOMS_COLLECTION, roomId);
+    return await runTransaction(db, async (transaction) => {
+      const roomSnap = await transaction.get(roomRef);
+      if (!roomSnap.exists()) return;
+      const room = roomSnap.data();
+      const players = (room.players || []).filter((p: any) => p.id !== playerId);
+      transaction.update(roomRef, {
+        players,
+        currentPlayers: players.length
+      });
+      return { ...room, players, currentPlayers: players.length };
+    });
+  },
+
+  // Subscribe to room updates (real-time)
+  subscribeToRoom(roomId: string, callback: (room: any) => void): Unsubscribe {
+    const roomRef = doc(db, ROOMS_COLLECTION, roomId);
+    return onSnapshot(roomRef, (snap) => {
+      if (snap.exists()) callback(snap.data());
+    });
+  },
+
+  // Subscribe to all rooms (for lobby)
+  subscribeToAllRooms(callback: (rooms: any[]) => void): Unsubscribe {
+    const roomsCol = collection(db, ROOMS_COLLECTION);
+    return onSnapshot(roomsCol, (snap) => {
+      callback(snap.docs.map(doc => doc.data()));
+    });
   }
 };
 

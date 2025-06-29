@@ -143,50 +143,42 @@ export const useGameStore = create<GameStore>((set, get) => ({
   joinRoom: async (roomId: string, password?: string) => {
     const { currentUser, setCurrentRoom } = get();
     if (!currentUser) throw new Error('Please create a username first');
-    let targetRoom = await roomServerAPI.getRoom(roomId);
-    if (!targetRoom) {
-      // Create new room if not exists
-      targetRoom = {
-        id: roomId,
-        name: `Room ${roomId}`,
-        isPrivate: password ? true : false,
-        password: password || undefined,
-        maxPlayers: 10,
-        currentPlayers: 1,
-        players: [currentUser],
-        gameInProgress: false,
-        host: currentUser.id,
-        gameMode: {
-          name: 'Classic',
-          description: 'Standard UNO rules',
-          rules: ['Standard UNO rules apply'],
-          isTeamMode: false,
-          maxPlayers: 10
-        },
-        houseRules: {
-          stackDrawCards: true,
-          jumpIn: false,
-          sevenSwap: false,
-          zeroRotate: false,
-          noBluffing: false,
-          challengeWild4: true
-        }
-      };
-      await roomServerAPI.createRoom(targetRoom);
-    } else {
-      // Validate join
-      const validation = canJoinRoom(targetRoom, currentUser, password);
-      if (!validation.canJoin) throw new Error(validation.error || 'Cannot join room');
-      // Add player to room
-      await roomServerAPI.addPlayerToRoom(roomId, currentUser);
-    }
+    // Prepare default room data if creating
+    const defaultRoomData = {
+      id: roomId,
+      name: `Room ${roomId}`,
+      isPrivate: password ? true : false,
+      password: password || undefined,
+      maxPlayers: 10,
+      currentPlayers: 1,
+      players: [currentUser],
+      gameInProgress: false,
+      host: currentUser.id,
+      gameMode: {
+        name: 'Classic',
+        description: 'Standard UNO rules',
+        rules: ['Standard UNO rules apply'],
+        isTeamMode: false,
+        maxPlayers: 10
+      },
+      houseRules: {
+        stackDrawCards: true,
+        jumpIn: false,
+        sevenSwap: false,
+        zeroRotate: false,
+        noBluffing: false,
+        challengeWild4: true
+      }
+    };
+    // Use atomic join/create
+    const targetRoom = await roomServerAPI.joinOrCreateRoom(roomId, currentUser, defaultRoomData);
     // Subscribe to room updates
     if (get().currentRoom?._unsubscribe) get().currentRoom._unsubscribe();
     const unsubscribe = roomServerAPI.subscribeToRoom(roomId, (updatedRoom) => {
       set({ currentRoom: { ...updatedRoom, _unsubscribe: unsubscribe } });
     });
     // Set current room
-    setCurrentRoom({ ...(await roomServerAPI.getRoom(roomId)), _unsubscribe: unsubscribe });
+    setCurrentRoom({ ...targetRoom, _unsubscribe: unsubscribe });
     // Update URL
     const url = new URL(window.location.href);
     url.searchParams.set('room', roomId);
