@@ -44,7 +44,7 @@ A modern, feature-rich UNO card game built with React, TypeScript, and Tailwind 
 
 1. **Clone the repository**
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/Kishore276/UNO-GAME.git
    cd uno-arena
    ```
 
